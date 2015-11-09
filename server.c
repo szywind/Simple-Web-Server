@@ -11,12 +11,67 @@
 // Most of the work is done within routines written in request.c
 //
 
+
+int isBufEmpty(volatile __buffer_ * buf){
+	//return (buf->tail == buf->head)?1:0;
+	return buf->length == 0;
+}
+
+int isBufFull(volatile __buffer_ * buf){
+	//return ((buf->tail+1)%buf->buffer_size == buf->head)?1:0;
+	return buf->length == buf->buffer_size;
+}
+
+__request_info_ deBuf(volatile __buffer_ * buf){
+	__request_info_ temp = buf->request[buf->head];
+	buf->head = (buf->head+1)%buf->buffer_size;
+	buf->length --;
+	return temp;
+}
+
+void enBuf(volatile __buffer_ * buf, __request_info_ req){
+	//buf->tail = (buf->tail+1)%buf->buffer_size;
+	buf->request[(buf->head+buf->length)%buf->buffer_size] = req;
+	buf->length ++;
+}
+
+
+volatile __buffer_ myBuffer;
+pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t full = PTHREAD_COND_INITIALIZER;
+pthread_cond_t empty = PTHREAD_COND_INITIALIZER;
+
+/* consumers */
+void * worker(void *arg) {
+	while(1){
+		//printf("worker\n");
+		pthread_mutex_lock(&mutex);
+		while(isBufEmpty(&myBuffer)){
+			pthread_cond_wait(&empty, &mutex);
+		}
+		
+		__request_info_ req = deBuf(&myBuffer);
+		pthread_cond_signal(&full);
+		pthread_mutex_unlock(&mutex);
+		//printf("connfd = %d\n", req.connfd);
+		requestHandle(req.connfd);
+	
+		Close(req.connfd);
+
+
+
+	}
+	return NULL;
+}
+
+
+
 // CS537: Parse the new arguments too
 void getargs(int *args, int argc, char *argv[])
 {
     if (argc != 4) {
-	fprintf(stderr, "Usage: %s <port> <threads> <buffers>\n", argv[0]);
-	exit(1);
+		fprintf(stderr, "Usage: %s <port> <threads> <buffers>\n", argv[0]);
+		exit(1);
     }
     args[0] = atoi(argv[1]);
     args[1] = atoi(argv[2]);
@@ -35,7 +90,7 @@ int main(int argc, char *argv[])
     int szBuffer = args[2];
     // 
     // CS537: Create some threads...
-    
+   
     // initialize the buffer
     myBuffer.buffer_size = szBuffer;
     myBuffer.head = 0;
@@ -76,16 +131,15 @@ int main(int argc, char *argv[])
 		while(isBufFull(&myBuffer)){
 			pthread_cond_wait(&full, &mutex);
 		}
-		
+
 		__request_info_ req;
 		req.connfd = connfd;
 
-		printf("connfd = %d\n", connfd);
+		//printf("connfd = %d\n", connfd);
 
 		enBuf(&myBuffer, req);
 
-		printf("sz = %d, head = %d, length = %d, request->connfd = %d\n",
-			myBuffer.buffer_size, myBuffer.head, myBuffer.length, myBuffer.request[0].connfd);
+		//printf("sz = %d, head = %d, length = %d, request->connfd = %d\n", myBuffer.buffer_size, myBuffer.head, myBuffer.length, myBuffer.request[0].connfd);
 		pthread_cond_signal(&empty);
 		pthread_mutex_unlock(&mutex);		
 
